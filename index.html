@@ -165,6 +165,7 @@ const map = new maplibregl.Map({
   container:'map',
   style:{
     version:8,
+    glyphs:'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
     sources:{
       sat:{type:'raster',tiles:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],tileSize:256,maxzoom:19,attribution:'Esri, Maxar'},
       osm:{type:'raster',tiles:['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],tileSize:256,maxzoom:19,attribution:'© OpenStreetMap'},
@@ -191,15 +192,34 @@ map.on('load', ()=>{
   map.addLayer({id:'route-line',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},
     paint:{'line-color':'#7ff0e4','line-width':3,'line-dasharray':[1.5,1.2],'line-opacity':.95}});
 
-  STOPS.forEach((s,i)=>{
-    const el = document.createElement('div');
-    el.className='pin'+(visited.has(s.slug)?' visited':'');
-    el.id='pin'+i;
-    el.textContent=(i+1);
-    el.title=s.name;
-    el.addEventListener('click', ()=>openStop(i));
-    new maplibregl.Marker({element:el,anchor:'center'}).setLngLat([s.lng,s.lat]).addTo(map);
-  });
+  map.addSource('stops',{type:'geojson',data:{type:'FeatureCollection',features:STOPS.map((s,i)=>({
+    type:'Feature', id:i, properties:{i:i, n:String(i+1), name:s.name},
+    geometry:{type:'Point', coordinates:[s.lng,s.lat]}
+  }))}});
+
+  map.addLayer({id:'stops-circle',type:'circle',source:'stops',paint:{
+    'circle-radius':['case',['boolean',['feature-state','active'],false],20,
+                      ['boolean',['feature-state','visited'],false],16,15],
+    'circle-color':['case',['boolean',['feature-state','active'],false],'#5b8cff',
+                     ['boolean',['feature-state','visited'],false],'#2b7f7a','#0b111a'],
+    'circle-stroke-color':['case',['boolean',['feature-state','active'],false],'#ffffff','#8ff0e6'],
+    'circle-stroke-width':2,
+    'circle-opacity':0.96
+  }});
+
+  map.addLayer({id:'stops-label',type:'symbol',source:'stops',layout:{
+    'text-field':['get','n'],
+    'text-size':12,
+    'text-font':['Noto Sans Regular'],
+    'text-allow-overlap':true,
+    'text-ignore-placement':true
+  },paint:{'text-color':'#eaf6ff'}});
+
+  map.on('click','stops-circle', e=>{ if(e.features && e.features.length) openStop(e.features[0].properties.i); });
+  map.on('mouseenter','stops-circle',()=>{ map.getCanvas().style.cursor='pointer'; });
+  map.on('mouseleave','stops-circle',()=>{ map.getCanvas().style.cursor=''; });
+
+  STOPS.forEach((s,i)=>{ if(visited.has(s.slug)) map.setFeatureState({source:'stops',id:i},{visited:true}); });
 
   updateProgress();
   fitAll();
@@ -219,8 +239,7 @@ function openStop(i){
   document.getElementById('pText').textContent=s.text;
   const img=document.getElementById('pImg'); img.src=IMAGES[s.slug]||('img/'+s.slug+'.jpg'); img.alt=s.name;
   document.getElementById('panel').classList.add('on');
-  document.querySelectorAll('.pin').forEach(p=>p.classList.remove('active'));
-  const pin=document.getElementById('pin'+i); if(pin) pin.classList.add('active');
+  STOPS.forEach((_,idx)=>map.setFeatureState({source:'stops',id:idx},{active: idx===i}));
   map.flyTo({center:[s.lng,s.lat],zoom:11.2,pitch:62,bearing:0,duration:1400});
   stopSpeech();
 }
@@ -233,7 +252,7 @@ function markDone(){
   if(current<0) return;
   const slug=STOPS[current].slug; visited.add(slug);
   localStorage.setItem('karelia_visited',JSON.stringify([...visited]));
-  const pin=document.getElementById('pin'+current); if(pin) pin.classList.add('visited');
+  map.setFeatureState({source:'stops',id:current},{visited:true});
   updateProgress();
 }
 document.getElementById('doneBtn').onclick=markDone;
@@ -244,7 +263,7 @@ function updateProgress(){
 }
 document.getElementById('resetBtn').onclick=()=>{
   visited.clear(); localStorage.removeItem('karelia_visited');
-  document.querySelectorAll('.pin').forEach(p=>p.classList.remove('visited')); updateProgress();
+  STOPS.forEach((_,idx)=>map.setFeatureState({source:'stops',id:idx},{visited:false})); updateProgress();
 };
 
 /* 3D панорама */
